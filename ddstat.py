@@ -28,7 +28,7 @@ from time import sleep
 from optparse import OptionParser
 
 __all__ = []
-__version__ = 0.2
+__version__ = 0.3
 __date__ = '2018-06-19'
 __updated__ = '2018-06-19'
 
@@ -37,13 +37,19 @@ TESTRUN = 0
 PROFILE = 0
 
 
+WIN32 = False
+if os.name == 'nt':
+    WIN32 = True
+
 def OUTPUT(outstring):
     outstring = str(outstring)
     sys.stdout.write(outstring + '\n')
 
+
 def OUTERR(outstring):
     outstring = str(outstring)
     sys.stderr.write(outstring + '\n')
+
 
 def sizeof_fmt(num, suffix='B'):
     '''Human-printable value generator stolen from Fred Cirera in 2007.'''
@@ -115,18 +121,42 @@ def eachdiskspace():
     return(diskdict)
 
 
+def processcount():
+    '''Returns number of running processes.'''
+    return(len(psutil.pids()))
+
+
+def uniqueprocesscount(processlist=[]):
+    '''Returns number of unique process names.'''
+    if not processlist:
+        processlist = psutil.get_process_list()
+    unique_procs = len(set(map(lambda x: x.name(), processlist)))
+    return(unique_procs)
+
+
+def fhcount(processlist=[]):
+    '''Returns number of file handles in use.'''
+    if not processlist:
+        processlist = psutil.get_process_list()
+    try:
+        if WIN32:
+            fhcounter = sum(map(lambda x: x.num_handles(), processlist))
+        else:
+            fhcounter = sum(map(lambda x: x.num_fds(), processlist))
+    except:
+        fhcounter = 'Unknown.  Maybe you need more privileges.'
+    return(fhcounter)
+
+
 def main(argv=None):
     '''Command line options.'''
-
     program_name = os.path.basename(sys.argv[0])
-    program_version = "v0.1"
+    program_version = __version__
     program_build_date = "%s" % __updated__
 
     program_version_string = '%%prog %s (%s)' % (program_version, program_build_date)
     program_longdesc = '''Print stripped-down system stats.'''
-    program_license = '''Copyright 2018 Dimitry Dukhovny 
-      Licensed under the GNU General Public License, 
-      version 3 https://www.gnu.org/licenses/gpl.txt'''
+    program_license = "Copyright 2018 Dimitry Dukhovny Licensed under the GNU General Public License, version 3 https://www.gnu.org/licenses/gpl.txt"
 
     if argv is None:
         argv = sys.argv[1:]
@@ -147,6 +177,12 @@ def main(argv=None):
                           help="Get per-device disk utilization")
         parser.add_option("-i", "--diskio", dest="diskio", action="store_true",
                           help="Get total transactions per second for a specified interval or per-disk if verbose")
+        parser.add_option("-p", "--procs", dest="procs", action="store_true",
+                          help="Get process count or compare unique process count to total if verbose.")
+        parser.add_option("-f", "--filehandles", dest="handles", action="store_true",
+                          help="Get number of open file handles.  Usually requires privilege escalation.")
+        parser.add_option("-a", "--all", dest="all", action="store_true",
+                          help="Perform all of the above checks.  Usually requires privilege escalation.")
 
         # set defaults
         parser.set_defaults(verbose=False)
@@ -156,17 +192,24 @@ def main(argv=None):
         parser.set_defaults(memory=False)
         parser.set_defaults(disk=False)
         parser.set_defaults(diskio=False)
+        parser.set_defaults(procs=False)
+        parser.set_defaults(handles=False)
+        parser.set_defaults(all=False)
 
         # process options
         (opts, args) = parser.parse_args(argv)
 
-        if opts.cpu:
+        # reusables
+        processlist = []
+        
+        # Handling our flags
+        if opts.cpu or opts.all:
             if opts.label:
                 OUTERR('\n[CPU]')
             OUTPUT(totalcpu())
             if opts.verbose:
                 OUTPUT(totalcpu())
-        if opts.memory:
+        if opts.memory or opts.all:
             if opts.label:
                 OUTERR('\n[MEMORY]')
             if opts.verbose:
@@ -174,21 +217,37 @@ def main(argv=None):
                 OUTPUT(ratio[0] + ' / ' + ratio[1])
             else:
                 OUTPUT(str(ramused()))
-        if opts.disk:
+        if opts.disk or opts.all:
             if opts.label:
                 OUTERR('\n[DISK]')
             diskstatus = eachdiskspace()
             for disk in diskstatus.keys():
                 OUTPUT(disk + ' :  ' + str(diskstatus[disk]))
-        if opts.diskio:
+        if opts.diskio or opts.all:
             if opts.label:
                 OUTERR('\n[DISKIO]')
-            if opts.verbose:
+            if opts.verbose or opts.all:
                 diskstatus = eachdiskio(opts.sample_interval)
                 for disk in diskstatus.keys():
                     OUTPUT(disk + ' :  ' + str(diskstatus[disk]))
             else:
                 OUTPUT(totaldiskio(opts.sample_interval))
+        if opts.procs or opts.all:
+            if opts.label:
+                OUTERR('\n[PROCESSES]')
+            if opts.verbose:
+                if not processlist:
+                    processlist = psutil.get_process_list()
+                OUTPUT(str(uniqueprocesscount(processlist)) +
+                       ' unique from a total of ' + str(processcount()))
+            else:
+                OUTPUT(processcount())
+        if opts.handles or opts.all:
+            if opts.label:
+                OUTERR('\n[HANDLES]')
+            if not processlist:
+                processlist = psutil.get_process_list()
+            OUTPUT(fhcount(processlist))
 
         # MAIN BODY #
 
